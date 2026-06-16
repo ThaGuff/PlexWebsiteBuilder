@@ -9,11 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Ensure only one MPM module is enabled (apt installs can re-enable mpm_event
-# alongside the base image's mpm_prefork, causing "More than one MPM loaded")
-RUN a2dismod mpm_event mpm_worker 2>/dev/null || true \
-    && a2enmod mpm_prefork 2>/dev/null || true
-
 # Install WP-CLI
 RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
     && chmod +x wp-cli.phar \
@@ -27,6 +22,19 @@ RUN docker-php-ext-install \
 
 # Enable Apache mod_rewrite for WordPress permalinks
 RUN a2enmod rewrite
+
+# Force exactly one MPM module enabled. This MUST be the last Apache-module
+# step in the build: docker-php-ext-install and other package config triggers
+# upstream can silently re-enable mpm_event, causing
+# "AH00534: apache2: Configuration error: More than one MPM loaded."
+# We disable every MPM via the mods-enabled symlinks directly (more reliable
+# than a2dismod when a module config trigger fires later) and then enable
+# only prefork, which mod_php requires (no threading support).
+RUN rm -f /etc/apache2/mods-enabled/mpm_event.load /etc/apache2/mods-enabled/mpm_event.conf \
+           /etc/apache2/mods-enabled/mpm_worker.load /etc/apache2/mods-enabled/mpm_worker.conf \
+           /etc/apache2/mods-enabled/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.conf \
+    && a2enmod mpm_prefork \
+    && a2query -m mpm_prefork
 
 # Configure OPcache for performance
 RUN { \
