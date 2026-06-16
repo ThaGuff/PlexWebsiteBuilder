@@ -55,19 +55,12 @@ RUN chmod +x /docker-entrypoint-initdb.d-custom/*.sh 2>/dev/null || true
 COPY ./scripts/setup.sh /usr/local/bin/webhop-setup.sh
 RUN chmod +x /usr/local/bin/webhop-setup.sh
 
-# Custom entrypoint: run WP-CLI setup in the background (non-blocking),
-# then hand off to WordPress's original entrypoint to start Apache
-RUN { \
-    echo '#!/bin/sh'; \
-    echo '/usr/local/bin/webhop-setup.sh > /var/log/webhop-setup.log 2>&1 &'; \
-    echo '# Respect Railway'"'"'s dynamic PORT, default to 80 if unset'; \
-    echo 'if [ -n "$PORT" ] && [ "$PORT" != "80" ]; then'; \
-    echo '  sed -ri "s/Listen 80/Listen $PORT/" /etc/apache2/ports.conf'; \
-    echo '  sed -ri "s/:80>/:$PORT>/" /etc/apache2/sites-available/000-default.conf'; \
-    echo 'fi'; \
-    echo 'exec docker-entrypoint.sh "$@"'; \
-} > /usr/local/bin/webhop-entrypoint.sh \
-    && chmod +x /usr/local/bin/webhop-entrypoint.sh
+# Custom entrypoint script content is written via a separate script file
+# (./scripts/webhop-entrypoint.sh) and copied in below, rather than generated
+# inline with echo, to avoid quoting bugs. See that file for the Railway MPM
+# runtime fix and dynamic PORT handling.
+COPY ./scripts/webhop-entrypoint.sh /usr/local/bin/webhop-entrypoint.sh
+RUN chmod +x /usr/local/bin/webhop-entrypoint.sh
 
 # Apache config for WordPress
 RUN { \
@@ -78,16 +71,6 @@ RUN { \
     echo '</Directory>'; \
 } > /etc/apache2/conf-available/wordpress.conf \
     && a2enconf wordpress
-
-# NOTE on MPM: no action needed here. The upstream php:8.2-apache base image
-# (which wordpress:6.5-php8.2-apache is built on) already runs
-# `a2dismod mpm_event && a2enmod mpm_prefork` during its own build, since
-# mod_php requires the non-threaded prefork MPM. Every "More than one MPM
-# loaded" failure in this file's history was caused by OUR OWN earlier fixes
-# fighting that already-correct state (deleting the working mpm_prefork
-# symlink, then re-adding it via a second, conflicting hardcoded LoadModule
-# line that Apache rejects as a duplicate). Leaving the base image's MPM
-# config untouched is the correct fix.
 
 EXPOSE 80
 
