@@ -23,19 +23,6 @@ RUN docker-php-ext-install \
 # Enable Apache mod_rewrite for WordPress permalinks
 RUN a2enmod rewrite
 
-# Force exactly one MPM module enabled. This MUST be the last Apache-module
-# step in the build: docker-php-ext-install and other package config triggers
-# upstream can silently re-enable mpm_event, causing
-# "AH00534: apache2: Configuration error: More than one MPM loaded."
-# We disable every MPM via the mods-enabled symlinks directly (more reliable
-# than a2dismod when a module config trigger fires later) and then enable
-# only prefork, which mod_php requires (no threading support).
-RUN rm -f /etc/apache2/mods-enabled/mpm_event.load /etc/apache2/mods-enabled/mpm_event.conf \
-           /etc/apache2/mods-enabled/mpm_worker.load /etc/apache2/mods-enabled/mpm_worker.conf \
-           /etc/apache2/mods-enabled/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.conf \
-    && a2enmod mpm_prefork \
-    && a2query -m mpm_prefork
-
 # Configure OPcache for performance
 RUN { \
     echo 'opcache.memory_consumption=128'; \
@@ -91,6 +78,25 @@ RUN { \
     echo '</Directory>'; \
 } > /etc/apache2/conf-available/wordpress.conf \
     && a2enconf wordpress
+
+# Final, deterministic MPM fix. Earlier attempts using a2enmod/a2dismod on the
+# mods-enabled symlinks were silently undone by a later trigger (most likely
+# a dpkg/apache2 package reconfigure invoked indirectly by docker-php-ext-install
+# or the mariadb-client install), causing the container to crash on every boot
+# with "AH00534: apache2: Configuration error: More than one MPM loaded."
+# Instead of fighting that state, we rewrite the actual include directive in
+# apache2.conf so it can ONLY ever load mpm_prefork.conf/.load, regardless of
+# what mods-enabled/ contains at runtime. We also physically delete the
+# mpm_event and mpm_worker module files (not just the mods-enabled symlinks)
+# so there is nothing left for any trigger to re-enable.
+RUN rm -f /etc/apache2/mods-available/mpm_event.load /etc/apache2/mods-available/mpm_event.conf \
+           /etc/apache2/mods-available/mpm_worker.load /etc/apache2/mods-available/mpm_worker.conf \
+    && rm -f /etc/apache2/mods-enabled/mpm_event.load /etc/apache2/mods-enabled/mpm_event.conf \
+              /etc/apache2/mods-enabled/mpm_worker.load /etc/apache2/mods-enabled/mpm_worker.conf \
+              /etc/apache2/mods-enabled/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.conf \
+    && ln -sf ../mods-available/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.load \
+    && ln -sf ../mods-available/mpm_prefork.conf /etc/apache2/mods-enabled/mpm_prefork.conf \
+    && apache2ctl -M 2>&1 | grep -c mpm_ | grep -qx 1
 
 EXPOSE 80
 
