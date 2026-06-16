@@ -104,7 +104,7 @@ RUN find /etc/apache2 /usr/lib/apache2/modules \
     && grep -q 'mpm_prefork_module' /etc/apache2/apache2.conf \
         || echo 'LoadModule mpm_prefork_module /usr/lib/apache2/modules/mod_mpm_prefork.so' >> /etc/apache2/apache2.conf \
     && apache2ctl -M 2>&1 \
-    && [ "$(apache2ctl -M 2>&1 | grep -c '_mpm')" = "1" ]
+    && [ "$(apache2ctl -M 2>&1 | grep -c 'mpm_')" = "1" ]
 
 EXPOSE 80
 
