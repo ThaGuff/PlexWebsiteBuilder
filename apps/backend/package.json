@@ -1,0 +1,49 @@
+{
+  "name": "webhop-backend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:migrate": "node dist/lib/db.js migrate"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "*",
+    "archiver": "*",
+    "axios": "*",
+    "bcryptjs": "*",
+    "bull": "*",
+    "cheerio": "*",
+    "cors": "*",
+    "dotenv": "*",
+    "express": "*",
+    "express-rate-limit": "*",
+    "form-data": "*",
+    "helmet": "*",
+    "ioredis": "*",
+    "jsonwebtoken": "*",
+    "multer": "*",
+    "node-cron": "*",
+    "pg": "*",
+    "unzipper": "*",
+    "uuid": "*",
+    "winston": "*"
+  },
+  "devDependencies": {
+    "@types/archiver": "*",
+    "@types/bcryptjs": "*",
+    "@types/cors": "*",
+    "@types/express": "*",
+    "@types/jsonwebtoken": "*",
+    "@types/multer": "*",
+    "@types/node": "*",
+    "@types/pg": "*",
+    "@types/unzipper": "*",
+    "@types/uuid": "*",
+    "nodemon": "*",
+    "ts-node": "*",
+    "typescript": "*"
+  }
+}
