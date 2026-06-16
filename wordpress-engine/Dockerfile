@@ -1,12 +1,18 @@
 FROM wordpress:6.5-php8.2-apache
 
 # Install system utilities and WP-CLI dependencies
-RUN apt-get update && apt-get install -y \
+# --no-install-recommends prevents apt from pulling in a second Apache MPM module
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     less \
     mariadb-client \
     unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Ensure only one MPM module is enabled (apt installs can re-enable mpm_event
+# alongside the base image's mpm_prefork, causing "More than one MPM loaded")
+RUN a2dismod mpm_event mpm_worker 2>/dev/null || true \
+    && a2enmod mpm_prefork 2>/dev/null || true
 
 # Install WP-CLI
 RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
@@ -54,6 +60,15 @@ RUN chmod +x /docker-entrypoint-initdb.d-custom/*.sh 2>/dev/null || true
 COPY ./scripts/setup.sh /usr/local/bin/webhop-setup.sh
 RUN chmod +x /usr/local/bin/webhop-setup.sh
 
+# Custom entrypoint: run WP-CLI setup in the background (non-blocking),
+# then hand off to WordPress's original entrypoint to start Apache
+RUN { \
+    echo '#!/bin/sh'; \
+    echo '/usr/local/bin/webhop-setup.sh > /var/log/webhop-setup.log 2>&1 &'; \
+    echo 'exec docker-entrypoint.sh "$@"'; \
+} > /usr/local/bin/webhop-entrypoint.sh \
+    && chmod +x /usr/local/bin/webhop-entrypoint.sh
+
 # Apache config for WordPress
 RUN { \
     echo '<Directory /var/www/html/>'; \
@@ -66,6 +81,10 @@ RUN { \
 
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost/wp-login.php || exit 1
+ENTRYPOINT ["webhop-entrypoint.sh"]
+CMD ["apache2-foreground"]
+
+# Health check — generous start period since first boot needs to wait for
+# MySQL + run WP-CLI install before wp-login.php responds correctly
+HEALTHCHECK --interval=10s --timeout=10s --start-period=180s --retries=10 \
+    CMD curl -fs http://localhost/ -o /dev/null || curl -fs http://localhost/wp-login.php -o /dev/null || exit 1
