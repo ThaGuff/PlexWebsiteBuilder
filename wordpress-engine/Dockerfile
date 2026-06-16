@@ -41,8 +41,17 @@ RUN { \
     echo 'max_execution_time = 300'; \
 } > /usr/local/etc/php/conf.d/uploads.ini
 
-# Copy WordPress files from our zip (pre-extracted)
-COPY ./wordpress/ /var/www/html/
+# NOTE: we intentionally do NOT copy our own wordpress/ source directory.
+# The base wordpress:6.5-php8.2-apache image already ships a complete,
+# internally-consistent WordPress core at /usr/src/wordpress, and the
+# official docker-entrypoint.sh automatically copies it into /var/www/html
+# on first container boot if no WordPress install is found there. Our own
+# manually-assembled wordpress/ directory turned out to be internally
+# inconsistent (likely mixed from different build artifacts), which caused
+# wp.hooks/applyFilters wiring failures in the admin UI and block editor —
+# present even after the file content itself loaded successfully. Trusting
+# the base image's bundled core, which ships as one coherent unit, avoids
+# this entire class of bug.
 
 # Copy our custom theme
 COPY ./themes/webhop-theme/ /var/www/html/wp-content/themes/webhop-theme/
