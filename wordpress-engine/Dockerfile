@@ -79,32 +79,15 @@ RUN { \
 } > /etc/apache2/conf-available/wordpress.conf \
     && a2enconf wordpress
 
-# Final, deterministic MPM fix. Multiple earlier attempts manipulating
-# mods-enabled symlinks (via a2enmod/a2dismod, and later direct rm + ln -sf)
-# all passed verification at BUILD time but the conflict reappeared at
-# CONTAINER START with "AH00534: apache2: Configuration error: More than
-# one MPM loaded." This means something in the base image's startup path
-# re-derives module state from outside /etc/apache2/mods-enabled at runtime
-# (Debian's apache2 init/systemd helpers can re-resolve MPM via
-# update-alternatives in some image variants).
-#
-# Rather than continuing to fight that resolution order, we bypass the
-# mods-enabled mechanism for MPM selection entirely: we comment out the
-# generic "IncludeOptional mods-enabled/*.load" wildcard's MPM matches by
-# removing all mpm_*.load/.conf files everywhere they could exist, then add
-# a single hardcoded LoadModule line for mpm_prefork directly into
-# apache2.conf. There is no longer any mpm_event or mpm_worker module file
-# left on disk for any mechanism to discover or load.
-RUN find /etc/apache2 /usr/lib/apache2/modules \
-        \( -iname 'mpm_event*' -o -iname '*mpm_event*' -o -iname 'mpm_worker*' -o -iname '*mpm_worker*' \) \
-        | xargs -r rm -f \
-    && rm -f /etc/apache2/mods-enabled/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.conf \
-    && grep -rl 'LoadModule mpm_\(event\|worker\)_module' /etc/apache2 2>/dev/null \
-        | xargs -r sed -i '/LoadModule mpm_\(event\|worker\)_module/d' \
-    && grep -q 'mpm_prefork_module' /etc/apache2/apache2.conf \
-        || echo 'LoadModule mpm_prefork_module /usr/lib/apache2/modules/mod_mpm_prefork.so' >> /etc/apache2/apache2.conf \
-    && apache2ctl -M 2>&1 \
-    && [ "$(apache2ctl -M 2>&1 | grep -c 'mpm_')" = "1" ]
+# NOTE on MPM: no action needed here. The upstream php:8.2-apache base image
+# (which wordpress:6.5-php8.2-apache is built on) already runs
+# `a2dismod mpm_event && a2enmod mpm_prefork` during its own build, since
+# mod_php requires the non-threaded prefork MPM. Every "More than one MPM
+# loaded" failure in this file's history was caused by OUR OWN earlier fixes
+# fighting that already-correct state (deleting the working mpm_prefork
+# symlink, then re-adding it via a second, conflicting hardcoded LoadModule
+# line that Apache rejects as a duplicate). Leaving the base image's MPM
+# config untouched is the correct fix.
 
 EXPOSE 80
 
