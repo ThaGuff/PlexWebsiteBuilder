@@ -3,7 +3,6 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "docker/Dockerfile.backend",
-    "buildCommand": "echo 'Building WebHop Backend'",
     "watchPatterns": [
       "apps/backend/**",
       "docker/Dockerfile.backend"

@@ -1,9 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
 import logger from '../lib/logger'
 import type { ScrapedBrandData } from './scraper'
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 })
 
 export interface BrandProfile {
@@ -65,21 +65,22 @@ export interface WebHopTheme {
   buttonStyle: string
 }
 
-async function callClaude(prompt: string, systemPrompt: string, maxTokens = 2000): Promise<string> {
-  const msg = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+async function callOpenAI(prompt: string, systemPrompt: string, maxTokens = 2000): Promise<string> {
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
     max_tokens: maxTokens,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt },
+    ],
   })
-
-  const content = msg.content[0]
-  if (content.type !== 'text') throw new Error('Unexpected response type from Claude')
-  return content.text
+  const content = response.choices[0]?.message?.content
+  if (!content) throw new Error('No response from OpenAI')
+  return content
 }
 
-async function callClaudeJSON<T>(prompt: string, systemPrompt: string, maxTokens = 2000): Promise<T> {
-  const text = await callClaude(prompt, systemPrompt + '\n\nRespond with ONLY valid JSON. No markdown, no explanation.', maxTokens)
+async function callOpenAIJSON<T>(prompt: string, systemPrompt: string, maxTokens = 2000): Promise<T> {
+  const text = await callOpenAI(prompt, systemPrompt + '\n\nRespond with ONLY valid JSON. No markdown, no explanation.', maxTokens)
   try {
     const cleaned = text.replace(/```json\n?|```/g, '').trim()
     return JSON.parse(cleaned) as T
@@ -100,7 +101,7 @@ export async function analyzeBrand(input: {
   style?: string
   colorPreference?: string
 }): Promise<BrandProfile> {
-  logger.info('[AI] Analyzing brand…')
+  logger.info('[AI] Analyzing brand with OpenAI GPT-4o…')
 
   const systemPrompt = `You are an expert brand strategist and web designer. 
   You create compelling brand identities for businesses.
@@ -127,7 +128,7 @@ Location: ${input.location || 'Not specified'}
 Preferred Style: ${input.style || 'modern-minimal'}
 Color Preference: ${input.colorPreference || 'None specified'}`
 
-  return callClaudeJSON<BrandProfile>(
+  return callOpenAIJSON<BrandProfile>(
     `${context}
 
 Generate a complete brand profile as JSON with these exact keys:
@@ -192,7 +193,7 @@ Return JSON with this structure:
   ]
 }`
 
-  return callClaudeJSON<PageContent>(prompt, systemPrompt, 2000)
+  return callOpenAIJSON<PageContent>(prompt, systemPrompt, 2000)
 }
 
 // ─── WordPress Theme Config ────────────────────────────────────────────────────
@@ -221,7 +222,7 @@ export async function generateSEOPackage(
   pages: string[],
   scraped?: ScrapedBrandData
 ): Promise<SEOPackage> {
-  logger.info('[AI] Generating SEO package…')
+  logger.info('[AI] Generating SEO package with OpenAI…')
 
   const systemPrompt = `You are an expert SEO strategist. 
 Generate highly optimized meta tags, schema markup, and keywords.
@@ -250,7 +251,7 @@ Return JSON:
   "robots": "index, follow"
 }`
 
-  return callClaudeJSON<SEOPackage>(prompt, systemPrompt, 2000)
+  return callOpenAIJSON<SEOPackage>(prompt, systemPrompt, 2000)
 }
 
 // ─── WordPress Block Content Generator ───────────────────────────────────────
@@ -261,9 +262,8 @@ export async function generateWordPressBlocks(
   logger.info(`[AI] Generating WordPress blocks for: ${page.title}`)
 
   const systemPrompt = `You are a WordPress Gutenberg expert. 
-Generate WordPress block editor JSON that produces beautiful, professional pages.
-Use only core WordPress blocks (no plugins needed).
-The output should be valid WordPress post content.`
+Generate WordPress block editor content that produces beautiful, professional pages.
+Use only core WordPress blocks (no plugins needed).`
 
   const prompt = `Create WordPress Gutenberg block content for the "${page.title}" page.
 
@@ -275,11 +275,9 @@ Brand:
 Page sections to include:
 ${page.sections.map(s => `- ${s.type}: "${s.heading}" — ${s.content.slice(0, 100)}`).join('\n')}
 
-Return the full WordPress block HTML/JSON content that can be saved directly as wp_insert_post content.
-Include proper Gutenberg block comments (<!-- wp:... -->).
-Make it visually impressive with custom colors and layout.`
+Return the full WordPress block HTML/JSON content with Gutenberg block comments (<!-- wp:... -->).`
 
-  return callClaude(prompt, systemPrompt, 3000)
+  return callOpenAI(prompt, systemPrompt, 3000)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
