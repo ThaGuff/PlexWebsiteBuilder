@@ -72,6 +72,21 @@ RUN { \
 } > /etc/apache2/conf-available/wordpress.conf \
     && a2enconf wordpress
 
+WORKDIR /var/www/html
+
+# Add this comment as documentation: WORDPRESS_CONFIG_EXTRA is set as an
+# environment variable on the Railway service (not here) to:
+#   $_SERVER['HTTPS'] = 'on';
+# Railway terminates TLS at its edge for all real external traffic, but its
+# internal healthcheck prober (RailwayHealthCheck/1.0) connects directly to
+# the container over plain HTTP without forwarding the X-Forwarded-Proto
+# header that wp-config-docker.php normally relies on to detect HTTPS. Since
+# WP_SITE_URL is configured as an https:// URL, WordPress's canonical
+# redirect logic then 302s every single request (including the healthcheck
+# itself) forever, because it always sees the request as "wrong protocol".
+# Forcing HTTPS detection unconditionally resolves this without weakening
+# anything, since this app is never legitimately reached over plain HTTP.
+
 EXPOSE 80
 
 ENTRYPOINT ["webhop-entrypoint.sh"]
