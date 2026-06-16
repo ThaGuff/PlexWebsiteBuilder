@@ -65,6 +65,11 @@ RUN chmod +x /usr/local/bin/webhop-setup.sh
 RUN { \
     echo '#!/bin/sh'; \
     echo '/usr/local/bin/webhop-setup.sh > /var/log/webhop-setup.log 2>&1 &'; \
+    echo '# Respect Railway'"'"'s dynamic PORT, default to 80 if unset'; \
+    echo 'if [ -n "$PORT" ] && [ "$PORT" != "80" ]; then'; \
+    echo '  sed -ri "s/Listen 80/Listen $PORT/" /etc/apache2/ports.conf'; \
+    echo '  sed -ri "s/:80>/:$PORT>/" /etc/apache2/sites-available/000-default.conf'; \
+    echo 'fi'; \
     echo 'exec docker-entrypoint.sh "$@"'; \
 } > /usr/local/bin/webhop-entrypoint.sh \
     && chmod +x /usr/local/bin/webhop-entrypoint.sh
@@ -87,4 +92,4 @@ CMD ["apache2-foreground"]
 # Health check — generous start period since first boot needs to wait for
 # MySQL + run WP-CLI install before wp-login.php responds correctly
 HEALTHCHECK --interval=10s --timeout=10s --start-period=180s --retries=10 \
-    CMD curl -fs http://localhost/ -o /dev/null || curl -fs http://localhost/wp-login.php -o /dev/null || exit 1
+    CMD curl -fs "http://localhost:${PORT:-80}/" -o /dev/null || curl -fs "http://localhost:${PORT:-80}/wp-login.php" -o /dev/null || exit 1
