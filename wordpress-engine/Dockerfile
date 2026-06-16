@@ -79,24 +79,32 @@ RUN { \
 } > /etc/apache2/conf-available/wordpress.conf \
     && a2enconf wordpress
 
-# Final, deterministic MPM fix. Earlier attempts using a2enmod/a2dismod on the
-# mods-enabled symlinks were silently undone by a later trigger (most likely
-# a dpkg/apache2 package reconfigure invoked indirectly by docker-php-ext-install
-# or the mariadb-client install), causing the container to crash on every boot
-# with "AH00534: apache2: Configuration error: More than one MPM loaded."
-# Instead of fighting that state, we rewrite the actual include directive in
-# apache2.conf so it can ONLY ever load mpm_prefork.conf/.load, regardless of
-# what mods-enabled/ contains at runtime. We also physically delete the
-# mpm_event and mpm_worker module files (not just the mods-enabled symlinks)
-# so there is nothing left for any trigger to re-enable.
-RUN rm -f /etc/apache2/mods-available/mpm_event.load /etc/apache2/mods-available/mpm_event.conf \
-           /etc/apache2/mods-available/mpm_worker.load /etc/apache2/mods-available/mpm_worker.conf \
-    && rm -f /etc/apache2/mods-enabled/mpm_event.load /etc/apache2/mods-enabled/mpm_event.conf \
-              /etc/apache2/mods-enabled/mpm_worker.load /etc/apache2/mods-enabled/mpm_worker.conf \
-              /etc/apache2/mods-enabled/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.conf \
-    && ln -sf ../mods-available/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.load \
-    && ln -sf ../mods-available/mpm_prefork.conf /etc/apache2/mods-enabled/mpm_prefork.conf \
-    && apache2ctl -M 2>&1 | grep -c mpm_ | grep -qx 1
+# Final, deterministic MPM fix. Multiple earlier attempts manipulating
+# mods-enabled symlinks (via a2enmod/a2dismod, and later direct rm + ln -sf)
+# all passed verification at BUILD time but the conflict reappeared at
+# CONTAINER START with "AH00534: apache2: Configuration error: More than
+# one MPM loaded." This means something in the base image's startup path
+# re-derives module state from outside /etc/apache2/mods-enabled at runtime
+# (Debian's apache2 init/systemd helpers can re-resolve MPM via
+# update-alternatives in some image variants).
+#
+# Rather than continuing to fight that resolution order, we bypass the
+# mods-enabled mechanism for MPM selection entirely: we comment out the
+# generic "IncludeOptional mods-enabled/*.load" wildcard's MPM matches by
+# removing all mpm_*.load/.conf files everywhere they could exist, then add
+# a single hardcoded LoadModule line for mpm_prefork directly into
+# apache2.conf. There is no longer any mpm_event or mpm_worker module file
+# left on disk for any mechanism to discover or load.
+RUN find /etc/apache2 /usr/lib/apache2/modules \
+        \( -iname 'mpm_event*' -o -iname '*mpm_event*' -o -iname 'mpm_worker*' -o -iname '*mpm_worker*' \) \
+        | xargs -r rm -f \
+    && rm -f /etc/apache2/mods-enabled/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.conf \
+    && grep -rl 'LoadModule mpm_\(event\|worker\)_module' /etc/apache2 2>/dev/null \
+        | xargs -r sed -i '/LoadModule mpm_\(event\|worker\)_module/d' \
+    && grep -q 'mpm_prefork_module' /etc/apache2/apache2.conf \
+        || echo 'LoadModule mpm_prefork_module /usr/lib/apache2/modules/mod_mpm_prefork.so' >> /etc/apache2/apache2.conf \
+    && apache2ctl -M 2>&1 \
+    && [ "$(apache2ctl -M 2>&1 | grep -c '_mpm')" = "1" ]
 
 EXPOSE 80
 
